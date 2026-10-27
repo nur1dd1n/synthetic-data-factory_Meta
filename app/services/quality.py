@@ -5,23 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
-def _validate_inputs(
-    original: pd.DataFrame,
-    synthetic: pd.DataFrame,
-) -> list[str]:
-    if original.empty:
-        raise ValueError("The original dataset is empty.")
-    if synthetic.empty:
-        raise ValueError("The synthetic dataset is empty.")
-
-    shared_columns = [
-        column for column in original.columns if column in synthetic.columns
-    ]
-    if not shared_columns:
-        raise ValueError("The datasets do not have any shared columns.")
-
-    return shared_columns
+from app.services.comparison import tokens, validate_pair
 
 
 def _numeric_distribution_similarity(
@@ -59,13 +43,8 @@ def _categorical_distribution_similarity(
     original: pd.Series,
     synthetic: pd.Series,
 ) -> float:
-    missing_marker = "<MISSING>"
-    original_values = (
-        original.astype(object).where(original.notna(), missing_marker).astype(str)
-    )
-    synthetic_values = (
-        synthetic.astype(object).where(synthetic.notna(), missing_marker).astype(str)
-    )
+    original_values = tokens(original)
+    synthetic_values = tokens(synthetic)
 
     original_frequencies = original_values.value_counts(normalize=True)
     synthetic_frequencies = synthetic_values.value_counts(normalize=True)
@@ -103,14 +82,14 @@ def _correlation_similarity(
 
     original_values = original_correlation.to_numpy()[upper_triangle]
     synthetic_values = synthetic_correlation.to_numpy()[upper_triangle]
-    valid = np.isfinite(original_values) & np.isfinite(synthetic_values)
+    valid = np.isfinite(original_values)
 
     if not valid.any():
         return None
 
-    mean_difference = float(
-        np.mean(np.abs(original_values[valid] - synthetic_values[valid]))
-    )
+    differences = np.abs(original_values[valid] - synthetic_values[valid])
+    # A collapsed synthetic column destroys a defined source relationship.
+    mean_difference = float(np.mean(np.nan_to_num(differences, nan=2.0)))
     return float(np.clip(1.0 - mean_difference / 2.0, 0.0, 1.0))
 
 
@@ -125,7 +104,7 @@ def evaluate_statistical_quality(
     privacy guarantee or as proof of downstream ML utility.
     """
 
-    shared_columns = _validate_inputs(original, synthetic)
+    shared_columns = validate_pair(original, synthetic)
     column_results = []
 
     for column in shared_columns:
@@ -206,6 +185,9 @@ def evaluate_statistical_quality(
         "per_column": column_results,
         "methodology": (
             "Numeric columns use empirical CDF similarity; categorical columns "
-            "use total-variation similarity; correlations use Pearson matrices."
+            "use total-variation similarity; correlations use Pearson matrices. "
+            "Overall weights: distribution 75%, missingness 10%, correlation 15%. "
+            "Without source correlations: distribution 90%, missingness 10%. "
+            "Per-column weights: distribution 85%, missingness 15%."
         ),
     }

@@ -42,3 +42,19 @@ def test_distribution_shift_reduces_quality_score():
 def test_quality_rejects_empty_data():
     with pytest.raises(ValueError, match="original dataset is empty"):
         evaluate_statistical_quality(pd.DataFrame(), pd.DataFrame({"x": [1]}))
+
+
+def test_missing_synthetic_column_is_not_silently_ignored():
+    with pytest.raises(ValueError, match="same columns"):
+        evaluate_statistical_quality(pd.DataFrame({"x": [1], "y": [2]}), pd.DataFrame({"x": [1]}))
+
+
+def test_collapsed_correlation_is_penalized():
+    source = pd.DataFrame({"x": [1, 2, 3], "y": [2, 4, 6]})
+    synthetic = pd.DataFrame({"x": [1, 1, 1], "y": [2, 4, 6]})
+    assert evaluate_statistical_quality(source, synthetic)["correlation_score"] == 0
+
+
+def test_literal_missing_marker_does_not_equal_null():
+    result = evaluate_statistical_quality(pd.DataFrame({"x": [None]}), pd.DataFrame({"x": ["<MISSING>"]}))
+    assert result["distribution_score"] == 0

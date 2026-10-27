@@ -1,206 +1,98 @@
-"""Heuristic privacy diagnostics for synthetic tabular data."""
-
+"""Record copying diagnostics, not a calibrated probability of disclosure."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+from app.services.comparison import tokens, validate_pair
 
 IDENTIFIER_TERMS = {
-    "address",
-    "email",
-    "first_name",
-    "fullname",
-    "full_name",
-    "last_name",
-    "name",
-    "passport",
-    "phone",
-    "social_security",
-    "ssn",
+    "id", "address", "email", "first_name", "fullname", "full_name",
+    "last_name", "name", "passport", "phone", "social_security", "ssn",
 }
 
 
-def _validate_inputs(
-    original: pd.DataFrame,
-    synthetic: pd.DataFrame,
-) -> list[str]:
-    if original.empty:
-        raise ValueError("The original dataset is empty.")
-    if synthetic.empty:
-        raise ValueError("The synthetic dataset is empty.")
-
-    shared_columns = [
-        column for column in original.columns if column in synthetic.columns
-    ]
-    if not shared_columns:
-        raise ValueError("The datasets do not have any shared columns.")
-
-    return shared_columns
+def _exact_match_rate(original, synthetic):
+    # Tuple equality avoids false matches due to hash collisions or null sentinels.
+    source = set(original.apply(tokens).itertuples(index=False, name=None))
+    matches = sum(row in source for row in synthetic.apply(tokens).itertuples(index=False, name=None))
+    return matches / len(synthetic)
 
 
-def _normalized_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
-    return dataframe.astype(object).where(dataframe.notna(), "<MISSING>").astype(str)
-
-
-def _exact_match_rate(
-    original: pd.DataFrame,
-    synthetic: pd.DataFrame,
-) -> float:
-    original_hashes = set(
-        pd.util.hash_pandas_object(
-            _normalized_rows(original),
-            index=False,
-        ).tolist()
-    )
-    synthetic_hashes = pd.util.hash_pandas_object(
-        _normalized_rows(synthetic),
-        index=False,
-    )
-    return float(synthetic_hashes.isin(original_hashes).mean())
-
-
-def _nearest_neighbor_distances(
-    original: pd.DataFrame,
-    synthetic: pd.DataFrame,
-    max_rows: int,
-) -> np.ndarray:
-    original_sample = original.sample(
-        n=min(len(original), max_rows),
-        random_state=42,
-    ).reset_index(drop=True)
-    synthetic_sample = synthetic.sample(
-        n=min(len(synthetic), max_rows),
-        random_state=42,
-    ).reset_index(drop=True)
-
-    distances = np.zeros((len(synthetic_sample), len(original_sample)), dtype=float)
-
-    for column in original.columns:
-        original_series = original_sample[column]
-        synthetic_series = synthetic_sample[column]
-        is_numeric = (
-            pd.api.types.is_numeric_dtype(original_series)
-            and pd.api.types.is_numeric_dtype(synthetic_series)
-            and not pd.api.types.is_bool_dtype(original_series)
-            and not pd.api.types.is_bool_dtype(synthetic_series)
-        )
-
-        if is_numeric:
-            original_values = pd.to_numeric(
-                original_series,
-                errors="coerce",
-            ).to_numpy(dtype=float)
-            synthetic_values = pd.to_numeric(
-                synthetic_series,
-                errors="coerce",
-            ).to_numpy(dtype=float)
-            finite_original = original_values[np.isfinite(original_values)]
-            scale = (
-                float(np.ptp(finite_original))
-                if finite_original.size > 0
-                else 0.0
-            )
-            scale = scale if scale > 0 else 1.0
-
-            difference = np.abs(
-                synthetic_values[:, np.newaxis]
-                - original_values[np.newaxis, :]
-            ) / scale
-            both_missing = (
-                np.isnan(synthetic_values)[:, np.newaxis]
-                & np.isnan(original_values)[np.newaxis, :]
-            )
-            one_missing = (
-                np.isnan(synthetic_values)[:, np.newaxis]
-                ^ np.isnan(original_values)[np.newaxis, :]
-            )
-            difference[both_missing] = 0.0
-            difference[one_missing] = 1.0
-            difference = np.nan_to_num(difference, nan=1.0, posinf=1.0, neginf=1.0)
-            distances += np.clip(difference, 0.0, 1.0)
+def _nearest_neighbor_distances(original, synthetic, max_rows):
+    query = synthetic.sample(n=min(len(synthetic), max_rows), random_state=42)
+    columns = []
+    for column in original:
+        left, right = original[column], query[column]
+        numeric = (pd.api.types.is_numeric_dtype(left) and pd.api.types.is_numeric_dtype(right)
+                   and not pd.api.types.is_bool_dtype(left) and not pd.api.types.is_bool_dtype(right))
+        if numeric:
+            a = left.to_numpy(dtype=float, na_value=np.nan)
+            b = right.to_numpy(dtype=float, na_value=np.nan)
+            finite = a[np.isfinite(a)]
+            scale = float(np.ptp(finite)) if len(finite) else 0
+            columns.append((True, a, b, scale))
         else:
-            original_values = (
-                original_series.astype(object)
-                .where(original_series.notna(), "<MISSING>")
-                .astype(str)
-                .to_numpy()
-            )
-            synthetic_values = (
-                synthetic_series.astype(object)
-                .where(synthetic_series.notna(), "<MISSING>")
-                .astype(str)
-                .to_numpy()
-            )
-            distances += (
-                synthetic_values[:, np.newaxis]
-                != original_values[np.newaxis, :]
-            ).astype(float)
-
-    distances /= len(original.columns)
-    return distances.min(axis=1)
-
-
-def _potential_identifier_columns(dataframe: pd.DataFrame) -> list[str]:
-    identifiers = []
-    for column in dataframe.columns:
-        normalized_name = str(column).strip().lower().replace(" ", "_")
-        unique_ratio = float(dataframe[column].nunique(dropna=True) / len(dataframe))
-        name_match = normalized_name in IDENTIFIER_TERMS or normalized_name.endswith(
-            ("_id", "_email", "_phone")
-        )
-        if name_match or unique_ratio >= 0.98:
-            identifiers.append(str(column))
-    return identifiers
+            columns.append((False, tokens(left).to_numpy(), tokens(right).to_numpy(), None))
+    nearest = np.full(len(query), np.inf)
+    # Every original row is searched; only synthetic queries are sampled.
+    for start in range(0, len(original), 512):
+        end = min(start + 512, len(original))
+        distances = np.zeros((len(query), end - start))
+        for numeric, a, b, scale in columns:
+            source = a[start:end][None, :]
+            values = b[:, None]
+            if numeric:
+                if scale > 0:
+                    difference = np.clip(np.abs(values - source) / scale, 0, 1)
+                else:
+                    difference = (values != source).astype(float)
+                difference[np.isnan(values) & np.isnan(source)] = 0
+                difference[np.isnan(values) ^ np.isnan(source)] = 1
+            else:
+                difference = (values != source).astype(float)
+            distances += difference
+        nearest = np.minimum(nearest, (distances / len(columns)).min(axis=1))
+    return nearest
 
 
-def evaluate_privacy_risk(
-    original: pd.DataFrame,
-    synthetic: pd.DataFrame,
-    max_distance_rows: int = 500,
-) -> dict:
-    """Estimate record-copying and nearest-neighbor disclosure risk.
+def _potential_identifier_columns(dataframe):
+    # Name-based alerts are distinct from high uniqueness, which also occurs in measurements.
+    return [str(c) for c in dataframe if (
+        str(c).strip().lower().replace(" ", "_") in IDENTIFIER_TERMS
+        or str(c).lower().endswith(("_id", "_email", "_phone"))
+    )]
 
-    This is a lightweight screening metric for a hackathon MVP. It is not a
-    formal differential-privacy, membership-inference, or re-identification
-    guarantee.
-    """
 
-    shared_columns = _validate_inputs(original, synthetic)
-    original_shared = original[shared_columns]
-    synthetic_shared = synthetic[shared_columns]
-
-    exact_match_rate = _exact_match_rate(original_shared, synthetic_shared)
-    nearest_distances = _nearest_neighbor_distances(
-        original_shared,
-        synthetic_shared,
-        max_rows=max_distance_rows,
-    )
-    distance_p05 = float(np.percentile(nearest_distances, 5))
-    distance_median = float(np.median(nearest_distances))
-
-    proximity_risk = float(np.clip((0.1 - distance_p05) / 0.1, 0.0, 1.0))
-    risk_score = 100 * (0.7 * exact_match_rate + 0.3 * proximity_risk)
-
-    if risk_score >= 60:
-        risk_level = "high"
-    elif risk_score >= 25:
-        risk_level = "medium"
-    else:
-        risk_level = "low"
-
+def evaluate_privacy_risk(original, synthetic, max_distance_rows=500):
+    columns = validate_pair(original, synthetic)
+    if isinstance(max_distance_rows, bool) or not isinstance(max_distance_rows, int) or max_distance_rows < 1:
+        raise ValueError("Distance sample size must be a positive integer.")
+    synthetic = synthetic[columns]
+    exact = _exact_match_rate(original, synthetic)
+    distances = _nearest_neighbor_distances(original, synthetic, max_distance_rows)
+    p05 = float(np.percentile(distances, 5))
+    proximity = float(np.clip((.1 - p05) / .1, 0, 1))
+    score = 100 * (.7 * exact + .3 * proximity)
+    identifiers = _potential_identifier_columns(original)
     return {
-        "risk_score": round(risk_score, 2),
-        "risk_level": risk_level,
-        "exact_match_rate": round(exact_match_rate * 100, 2),
-        "nearest_distance_p05": round(distance_p05, 4),
-        "nearest_distance_median": round(distance_median, 4),
-        "distance_sample_size": int(len(nearest_distances)),
-        "potential_identifier_columns": _potential_identifier_columns(
-            original_shared
-        ),
-        "warning": (
-            "Heuristic screening only. This score does not prove anonymity or "
-            "differential privacy."
-        ),
+        "risk_score": round(score, 2),
+        "risk_level": "high" if score >= 60 else "medium" if score >= 25 else "low",
+        "score_scope": "Uncalibrated record-copying heuristic; not overall privacy risk",
+        "exact_match_rate": round(exact * 100, 2),
+        "nearest_distance_p05": round(p05, 4),
+        "nearest_distance_median": round(float(np.median(distances)), 4),
+        "distance_sample_size": len(distances), "reference_rows": len(original),
+        "potential_identifier_columns": identifiers,
+        "high_uniqueness_columns": [str(c) for c in original if original[c].nunique() / len(original) >= .98],
+        "identifier_value_overlap_percent": {
+            c: round(float(tokens(synthetic[c]).isin(set(tokens(original[c].dropna())))[synthetic[c].notna()].mean()) * 100, 2)
+            if synthetic[c].notna().any() else 0.0 for c in identifiers if c in original
+        },
+        "methodology": {
+            "score": "100 * (0.7 * exact_match_fraction + 0.3 * clip((0.1 - distance_p05)/0.1, 0, 1))",
+            "distance": "Mean per-column range-normalized numeric distance or categorical mismatch; all source rows searched",
+            "thresholds": "low <25, medium <60, high >=60; heuristic, not calibrated",
+        },
+        "warning": "Low copying indicators do not establish anonymity. Identifier overlap is reported separately; no differential privacy or membership-inference guarantee.",
     }
