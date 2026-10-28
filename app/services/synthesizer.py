@@ -22,10 +22,10 @@ def generate_synthetic_data(
     metadata = Metadata.detect_from_dataframes(
         data={"data": df},
         infer_keys=None,
-    )
-
+        )
+    
     synthesizer = GaussianCopulaSynthesizer(metadata)
     synthesizer.fit(data={"data": df})
-
+    
     synthetic_data = synthesizer.sample(num_rows=int(num_rows))
     return synthetic_data["data"]

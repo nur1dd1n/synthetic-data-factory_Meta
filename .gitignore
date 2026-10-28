@@ -1,4 +1,4 @@
-.env 
+.env
 .env.*
 !.env.example
 
@@ -38,6 +38,7 @@ data/raw/
 data/private/
 data/uploads/
 data/generated/
+generated_data/
 *.csv
 *.parquet
 *.sqlite3
@@ -45,7 +46,7 @@ data/generated/
 
 checkpoints/
 models/
-*.pt 
+*.pt
 *.pth
 *.ckpt
 *.pkl
