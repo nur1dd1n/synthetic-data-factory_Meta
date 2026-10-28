@@ -19,13 +19,13 @@ def generate_synthetic_data(
     if df.isna().all().any():
         raise ValueError("The dataset contains completely empty columns.")
 
-    metadata = Metadata.detect_from_dataframe(
-        data=df,
-        table_name="data",
+    metadata = Metadata.detect_from_dataframes(
+        data={"data": df},
         infer_keys=None,
-    )
-
+        )
+    
     synthesizer = GaussianCopulaSynthesizer(metadata)
-    synthesizer.fit(data=df)
-
-    return synthesizer.sample(num_rows=int(num_rows))
+    synthesizer.fit(data={"data": df})
+    
+    synthetic_data = synthesizer.sample(num_rows=int(num_rows))
+    return synthetic_data["data"]
