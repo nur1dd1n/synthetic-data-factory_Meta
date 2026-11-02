@@ -130,7 +130,8 @@ if uploaded_file is not None or use_demo:
         if result is not None:
             synthetic_df, reference, trust_report = result
             st.subheader("🔬 Synthetic Data Preview")
-            st.dataframe(synthetic_df.head(20), use_container_width=True)
+            st.caption(f"All {len(synthetic_df):,} generated rows are available below. Scroll to view them.")
+            st.dataframe(synthetic_df, use_container_width=True, height=500)
             st.download_button(
                 label="⬇️ Download Synthetic CSV",
                 data=synthetic_df.to_csv(index=False).encode("utf-8"),

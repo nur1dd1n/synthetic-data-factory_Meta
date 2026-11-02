@@ -12,6 +12,10 @@ def test_demo_generation_exports_and_settings_invalidation():
     app.button[0].click().run(timeout=60)
     assert not app.exception
     assert not app.error
+    synthetic = app.session_state["generation_result"][0]
+    assert len(synthetic) == 300
+    assert app.dataframe[2].value.equals(synthetic)
+    assert any("All 300 generated rows" in item.value for item in app.caption)
     report = app.session_state["generation_result"][2]
     assert report["test_rows"] == 75
     assert report["errors"] == {}
