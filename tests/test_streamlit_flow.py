@@ -9,7 +9,7 @@ def test_demo_generation_exports_and_settings_invalidation():
     app = AppTest.from_file(APP).run(timeout=30)
     app.checkbox[0].check().run()
     app.selectbox(key="target_column").select("fraud").run()
-    app.button[0].click().run(timeout=60)
+    app.button[1].click().run(timeout=60)
     assert not app.exception
     assert not app.error
     synthetic = app.session_state["generation_result"][0]
@@ -36,7 +36,7 @@ def test_failed_ml_diagnostic_keeps_csv_download(monkeypatch):
     app = AppTest.from_file(APP).run(timeout=30)
     app.checkbox[0].check().run()
     app.selectbox(key="target_column").select("fraud").run()
-    app.button[0].click().run(timeout=60)
+    app.button[1].click().run(timeout=60)
     assert not app.exception
     assert not app.error
     assert len(app.get("download_button")) == 3
