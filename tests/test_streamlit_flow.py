@@ -8,6 +8,8 @@ APP = str(Path(__file__).resolve().parents[1] / "frontend" / "streamlit_app.py")
 def test_demo_generation_exports_and_settings_invalidation():
     app = AppTest.from_file(APP).run(timeout=30)
     app.checkbox[0].check().run()
+    assert app.selectbox(key="target_column").value == "fraud"
+    assert app.selectbox(key="task_type").value == "classification"
     app.selectbox(key="target_column").select("fraud").run()
     app.button[1].click().run(timeout=60)
     assert not app.exception

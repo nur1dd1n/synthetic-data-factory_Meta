@@ -28,5 +28,18 @@ def test_generate_synthetic_data_returns_requested_shape():
 
 
 def test_generate_synthetic_data_validates_row_count():
-    with pytest.raises(ValueError, match="greater than zero"):
+    with pytest.raises(ValueError, match="positive integer"):
         generate_synthetic_data(pd.DataFrame({"value": [1, 2]}), num_rows=0)
+
+    with pytest.raises(ValueError, match="positive integer"):
+        generate_synthetic_data(pd.DataFrame({"value": [1, 2]}), num_rows=1.5)
+
+
+def test_generate_synthetic_data_validates_settings():
+    source = pd.DataFrame({"value": [1, 2, 3, 4, 5]})
+
+    with pytest.raises(ValueError, match="Unsupported distribution"):
+        generate_synthetic_data(source, default_distribution="invented")
+
+    with pytest.raises(ValueError, match="must be true or false"):
+        generate_synthetic_data(source, enforce_rounding="yes")

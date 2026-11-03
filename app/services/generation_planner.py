@@ -5,7 +5,11 @@ import json
 import os
 
 from openai import OpenAI
-from sdv.single_table import GaussianCopulaSynthesizer
+
+from app.services.synthesizer import (
+    ALLOWED_DISTRIBUTIONS,
+    DEFAULT_GENERATOR_SETTINGS,
+)
 
 
 ALLOWED_TASKS = {"auto", "classification", "regression"}
@@ -13,8 +17,8 @@ ALLOWED_PRIORITIES = {"quality", "privacy", "ml_utility"}
 
 
 def _get_client():
-    api_key = os.getenv("MODEL_API_KEY")
-    if not api_key:
+    api_key = os.getenv("MODEL_API_KEY", "").strip()
+    if not api_key or "your_" in api_key or "replace_with" in api_key:
         raise RuntimeError("MODEL_API_KEY не найден. Проверь файл .env")
 
     return OpenAI(
@@ -381,18 +385,12 @@ def create_generation_settings(
 ) -> dict:
     """Ask Meta AI for validated SDV generation settings."""
 
-    allowed_distributions = sorted(
-        GaussianCopulaSynthesizer._DISTRIBUTIONS.keys()
-    )
+    allowed_distributions = sorted(ALLOWED_DISTRIBUTIONS)
 
     if not allowed_distributions:
         raise RuntimeError("SDV has no supported distributions.")
 
-    current_settings = current_settings or {
-        "default_distribution": "beta",
-        "enforce_min_max_values": True,
-        "enforce_rounding": True,
-    }
+    current_settings = current_settings or DEFAULT_GENERATOR_SETTINGS.copy()
 
     safe_profile = json.dumps(
         profile,

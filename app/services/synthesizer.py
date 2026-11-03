@@ -1,43 +1,22 @@
-# import pandas as pd
-# from sdv.metadata import Metadata
-# from sdv.single_table import GaussianCopulaSynthesizer
-
-
-# def generate_synthetic_data(
-#     df: pd.DataFrame,
-#     num_rows: int = 1000,
-# ) -> pd.DataFrame:
-#     if df.empty:
-#         raise ValueError("The source dataset is empty.")
-
-#     if num_rows < 1:
-#         raise ValueError("Number of rows must be greater than zero.")
-
-#     if df.columns.duplicated().any():
-#         raise ValueError("Column names must be unique.")
-
-#     if df.isna().all().any():
-#         raise ValueError("The dataset contains completely empty columns.")
-
-#     metadata = Metadata.detect_from_dataframes(
-#         data={"data": df},
-#         infer_keys=None,
-#         )
-    
-#     synthesizer = GaussianCopulaSynthesizer(metadata)
-#     synthesizer.fit(data={"data": df})
-    
-#     synthetic_data = synthesizer.sample(num_rows=int(num_rows))
-#     return synthetic_data["data"]
-
 import pandas as pd
 from sdv.metadata import Metadata
 from sdv.single_table import GaussianCopulaSynthesizer
 
 
-ALLOWED_DISTRIBUTIONS = set(
-    GaussianCopulaSynthesizer._DISTRIBUTIONS.keys()
-)
+# Keep the public application contract independent of SDV private attributes.
+ALLOWED_DISTRIBUTIONS = {
+    "beta",
+    "gamma",
+    "gaussian_kde",
+    "norm",
+    "truncnorm",
+    "uniform",
+}
+DEFAULT_GENERATOR_SETTINGS = {
+    "default_distribution": "beta",
+    "enforce_min_max_values": True,
+    "enforce_rounding": True,
+}
 
 
 def generate_synthetic_data(
@@ -50,8 +29,8 @@ def generate_synthetic_data(
     if df.empty:
         raise ValueError("The source dataset is empty.")
 
-    if num_rows < 1:
-        raise ValueError("Number of rows must be greater than zero.")
+    if isinstance(num_rows, bool) or not isinstance(num_rows, int) or num_rows < 1:
+        raise ValueError("Number of rows must be a positive integer.")
 
     if df.columns.duplicated().any():
         raise ValueError("Column names must be unique.")
@@ -63,6 +42,12 @@ def generate_synthetic_data(
         raise ValueError(
             f"Unsupported distribution: {default_distribution}"
         )
+
+    if not isinstance(enforce_min_max_values, bool):
+        raise ValueError("enforce_min_max_values must be true or false.")
+
+    if not isinstance(enforce_rounding, bool):
+        raise ValueError("enforce_rounding must be true or false.")
 
     metadata = Metadata.detect_from_dataframes(
         data={"data": df},
@@ -78,5 +63,5 @@ def generate_synthetic_data(
 
     synthesizer.fit(data={"data": df})
 
-    synthetic_data = synthesizer.sample(num_rows=int(num_rows))
+    synthetic_data = synthesizer.sample(num_rows=num_rows)
     return synthetic_data["data"]

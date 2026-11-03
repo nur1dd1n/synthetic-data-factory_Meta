@@ -4,7 +4,12 @@ import pandas as pd
 
 from app.services.demo_data import make_demo_data
 from app.services.ml_utility import split_for_utility
-from app.services.trust_report import run_generation, report_json, report_markdown
+from app.services.trust_report import (
+    compare_generation_reports,
+    report_json,
+    report_markdown,
+    run_generation,
+)
 from frontend.trust_report_ui import distribution_table
 
 
@@ -62,3 +67,28 @@ def test_categorical_tail_preserves_all_probability_mass():
     table = distribution_table(values, values)
     assert abs(table.Original.sum() - 1) < 1e-9
     assert "[remaining categories]" in table.index
+
+
+def test_report_records_reproducible_generator_settings():
+    _, _, report = run_generation(make_demo_data(), 25)
+
+    assert report["generator"] == "SDV GaussianCopulaSynthesizer"
+    assert report["generator_settings"]["default_distribution"] == "beta"
+
+
+def test_comparison_rejects_candidate_that_loses_a_diagnostic():
+    current = {
+        "quality": {"overall_score": 80},
+        "ml_utility": {"utility_score": 70},
+        "privacy": {"risk_score": 10},
+    }
+    candidate = {
+        "quality": {"overall_score": 90},
+        "ml_utility": None,
+        "privacy": {"risk_score": 10},
+    }
+
+    comparison = compare_generation_reports(current, candidate)
+
+    assert comparison["accepted"] is False
+    assert comparison["comparisons"]["ml_utility"]["status"] == "unavailable"

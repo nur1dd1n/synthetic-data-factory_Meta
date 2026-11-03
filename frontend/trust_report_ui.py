@@ -32,6 +32,10 @@ def render_trust_report(report, original, synthetic):
     st.subheader("Automated Trust Report")
     st.caption(f"This run: {report['training_rows']} training rows, {report['test_rows']} reserved test rows, "
                f"{report['generated_rows']} synthetic rows. Target: {report['target'] or 'none'}.")
+    if report.get("generator_settings"):
+        with st.expander("Reproducible generator settings"):
+            st.write(report.get("generator", "Synthetic data generator"))
+            st.json(report["generator_settings"])
     quality, privacy, utility = (report[k] for k in ("quality", "privacy", "ml_utility"))
     columns = st.columns(3)
     for column, label, value in zip(columns,
@@ -93,7 +97,7 @@ def render_trust_report(report, original, synthetic):
         st.subheader("🤖 AI Improvement Loop")
 
         st.metric(
-            "Completed iterations",
+            "Attempted tuning iterations",
             f"{improvement['completed_iterations']} / {improvement['max_iterations']}",
         )
 

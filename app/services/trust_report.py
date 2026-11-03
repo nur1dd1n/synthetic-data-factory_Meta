@@ -7,11 +7,22 @@ import json
 from app.services.ml_utility import evaluate_ml_utility, split_for_utility
 from app.services.privacy import evaluate_privacy_risk
 from app.services.quality import evaluate_statistical_quality
-from app.services.synthesizer import generate_synthetic_data
+from app.services.synthesizer import (
+    DEFAULT_GENERATOR_SETTINGS,
+    generate_synthetic_data,
+)
 from app.services.generation_planner import create_generation_settings
 
 
-def run_generation(source, num_rows, target=None, task="auto", generator=None, generator_settings=None,):
+def run_generation(
+    source,
+    num_rows,
+    target=None,
+    task="auto",
+    generator=None,
+    generator_settings=None,
+):
+    is_default_generator = generator is None
     generator = generator or generate_synthetic_data
     requested_task = task
     train, test = source, None
@@ -38,6 +49,11 @@ def run_generation(source, num_rows, target=None, task="auto", generator=None, g
         "target": target, "task_requested": requested_task, "resolved_task": task,
         "holdout_random_state": 42 if test is not None else None, "errors": errors,
         "quality": None, "privacy": None, "ml_utility": None,
+        "generator": "SDV GaussianCopulaSynthesizer" if is_default_generator else "custom",
+        "generator_settings": (
+            (generator_settings or DEFAULT_GENERATOR_SETTINGS).copy()
+            if is_default_generator else None
+        ),
         "comparison_reference": "generator training rows",
         "limitations": [
             "Scores describe this dataset and run; they are not privacy certification.",
@@ -80,12 +96,30 @@ def compare_generation_reports(current_report, candidate_report):
         current_value = current_data.get(metric)
         candidate_value = candidate_data.get(metric)
 
-        if current_value is None or candidate_value is None:
+        if current_value is None and candidate_value is None:
             comparisons[section] = {
                 "current": current_value,
                 "candidate": candidate_value,
                 "status": "not_comparable",
             }
+            continue
+
+        if current_value is not None and candidate_value is None:
+            candidate_worse = True
+            comparisons[section] = {
+                "current": current_value,
+                "candidate": candidate_value,
+                "status": "unavailable",
+            }
+            continue
+
+        if current_value is None:
+            comparisons[section] = {
+                "current": current_value,
+                "candidate": candidate_value,
+                "status": "newly_available",
+            }
+            candidate_better = True
             continue
 
         if direction == "higher":
@@ -143,11 +177,7 @@ def run_improvement_loop(
         source, num_rows, target, task
     )
 
-    best_settings = {
-        "default_distribution": "beta",
-        "enforce_min_max_values": True,
-        "enforce_rounding": True,
-    }
+    best_settings = DEFAULT_GENERATOR_SETTINGS.copy()
 
     history = []
 

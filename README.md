@@ -1,5 +1,7 @@
 # Synthetic Data Factory
 
+[![tests](https://github.com/nur1dd1n/synthetic-data-factory_Meta/actions/workflows/tests.yml/badge.svg)](https://github.com/nur1dd1n/synthetic-data-factory_Meta/actions/workflows/tests.yml)
+
 Synthetic Data Factory generates tabular synthetic data from an uploaded CSV
 and automatically reports how useful and how risky the generated dataset may
 be. It is an MVP for the Meta AI hackathon.
@@ -14,9 +16,12 @@ be. It is an MVP for the Meta AI hackathon.
    - statistical similarity of distributions and correlations;
    - downstream ML utility for an optional target column;
    - heuristic privacy risk based on exact matches and nearest neighbors.
-5. Ask Meta Muse Spark 1.3 to explain the dataset profile and recommend next
-   steps.
-6. Compare distribution charts and correlation matrices, then download the
+5. Optionally ask Meta Muse Spark 1.3 for a validated generation plan. The AI
+   can propose SDV settings; candidates are measured and accepted only when
+   they improve at least one diagnostic without degrading another.
+6. Ask Meta AI to explain the measured aggregate trust report and recommend
+   next steps without sending uploaded source rows.
+7. Compare distribution charts and correlation matrices, then download the
    generated CSV and an aggregate report as JSON or Markdown.
 
 ## Local setup
@@ -33,12 +38,15 @@ cp -n .env.example .env
 Add a Meta Model API key to `.env`:
 
 ```dotenv
-MODEL_API_KEY=replace_with_your_api_key
+MODEL_API_KEY=LLM|your_numeric_id|your_secret
 ```
 
 The Meta integration uses the OpenAI-compatible Meta Model API with
 `muse-spark-1.3`. The canonical configuration is documented in the
 [Meta Model API cookbook](https://github.com/meta-models/meta-model-cookbook/tree/main/01_api_fundamentals).
+Keys use the `LLM|numeric_id|secret` format. A `401 invalid_api_key` response
+means the value must be replaced with a fresh key from the Meta Model API
+dashboard; restart Streamlit after changing `.env`.
 
 ## Run the application
 
@@ -54,6 +62,10 @@ python -m streamlit run frontend/streamlit_app.py
 python -m pytest -q
 ```
 
+The test suite mocks Meta AI responses and does not require an API key or make
+network requests. `test_planner.py` is a separate manual endpoint smoke test;
+run it directly only when you want to verify a configured key.
+
 ## Interpreting the report
 
 - Higher **Statistical Similarity** is better.
@@ -64,19 +76,34 @@ The privacy score is an MVP screening heuristic. Synthetic data does not
 automatically guarantee anonymity, differential privacy, or protection from
 membership-inference and re-identification attacks.
 
-## Demo in 90 seconds
+## Jury demo in 2 minutes
 
 1. Select **Try invented transaction demo data**. All 300 rows are invented;
-   this is not a real fraud benchmark or real customer data.
-2. Select target **fraud**, task **classification**, and generate 300 rows.
+   this is not a real fraud benchmark or real customer data. The **fraud**
+   target and **classification** task are selected automatically.
+2. Click **Generate Synthetic Data** to demonstrate that the core product works
+   locally without an external API.
 3. Inspect distributions for **amount** and **channel**, correlations, and the
    real-trained versus synthetic-trained macro F1 scores.
 4. Inspect exact matches, proximity, and recommendations. Download the report.
+5. If a Meta key is configured, show the Copilot goal, create a generation
+   plan, and click **Approve Plan & Generate**. Open the iteration history to
+   show that AI proposals are evaluated rather than trusted blindly.
 
 Meta AI is optional. Generation, diagnostics and export run locally without an
-API key. The existing Meta AI button sends the dataset profile to Meta; uploaded
-row previews are not sent by that code. Profiles can still contain sensitive
-column names and aggregate statistics.
+API key. Copilot requests send the aggregate dataset profile, the user's goal,
+and—when requested—the aggregate trust report. Uploaded source rows and row
+previews are not sent by this code. Profiles can still contain sensitive column
+names and aggregate statistics, so review them before using an external API.
+
+## AI safety boundary
+
+Meta AI proposes a plan and a small, allow-listed set of Gaussian Copula
+settings. Application code validates every structured response. The improvement
+loop always generates a local baseline, measures every candidate with the same
+quality, ML utility, and copying diagnostics, and rejects candidates that lose
+an available diagnostic or trade one metric against another. AI output is not a
+privacy certification and cannot bypass the report checks.
 
 ## Evaluation protocol and limits
 
