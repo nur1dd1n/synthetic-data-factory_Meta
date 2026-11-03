@@ -13,7 +13,8 @@ from app.services.ai_assistant import explain_dataset
 from app.services.demo_data import make_demo_data
 from app.services.trust_report import run_generation
 from frontend.trust_report_ui import render_trust_report
-
+from app.services.generation_planner import create_generation_plan
+from app.services.generation_planner import create_next_recommendation
 
 st.set_page_config(
     page_title="Synthetic Data Factory",
@@ -107,7 +108,283 @@ if uploaded_file is not None or use_demo:
             help="Reserve 25% of distinct labeled real rows before training the generator. Both models use that same test set.",
         )
         task = st.selectbox("ML task", ["auto", "classification", "regression"], disabled=target_option is None)
+
+        st.session_state["current_generation_profile"] = profile_dataframe(generation_source)
+        st.session_state["current_ml_task"] = task
+
+        st.divider()
+        st.subheader("🤖 AI Synthetic Data Copilot")
+
+        if "ai_recommendation_history" not in st.session_state:
+            st.session_state["ai_recommendation_history"] = []
+
+        if "ai_recommendation_iteration" not in st.session_state:
+            st.session_state["ai_recommendation_iteration"] = 0
+
+        if "ai_recommendation_limit" not in st.session_state:
+            st.session_state["ai_recommendation_limit"] = 5
+
+
+
+
+
+        def get_next_ai_recommendation():
+            """Ask Meta AI for the next recommendation."""
+            try:
+                result = create_next_recommendation(
+                    user_request=st.session_state.get(
+                        "copilot_request_input", ""
+                    ),
+                    profile=st.session_state["current_generation_profile"],
+                    history=st.session_state["ai_recommendation_history"],
+                    target_column=st.session_state.get("target_column"),
+                    task=st.session_state.get("current_ml_task", "auto"),
+                )
+
+                if result["done"]:
+                    st.session_state["ai_recommendations_finished"] = True
+                    st.session_state.pop("current_ai_recommendation", None)
+                else:
+                    st.session_state["current_ai_recommendation"] = (
+                        result["recommendation"]
+                    )
+
+            except Exception as error:
+                st.session_state["ai_recommendation_error"] = str(error)
+
+
+        def save_ai_decision(recommendation, decision):
+            """Save the user's Accept or Reject decision."""
+
+            st.session_state["ai_recommendation_history"].append(
+                {
+                    "title": recommendation["title"],
+                    "problem": recommendation["problem"],
+                    "action": recommendation["action"],
+                    "decision": decision,
+                }
+            )
+
+            st.session_state["ai_recommendation_iteration"] += 1
+
+                # Remove the current recommendation.
+            st.session_state.pop("current_ai_recommendation", None)
+
+            get_next_ai_recommendation()
+
+
+
+        def apply_ai_recommendation(goal):
+            st.session_state["copilot_request_input"] = goal
+            st.session_state.pop("copilot_plan", None)
+            st.session_state.pop("copilot_plan_config", None)
+
+        user_request = st.text_area(
+        "Describe what synthetic data you want",
+        key="copilot_request_input",
+        placeholder=(
+            "Example: Generate synthetic transactions while "
+            "preserving fraud patterns and reducing privacy risks."
+        ),
+        help="Describe your desired result in natural language.",
+        )
+
         config = json.dumps([source_id, int(num_rows), excluded, target_option, task])
+
+
+        history = st.session_state["ai_recommendation_history"]
+
+        if history:
+            st.markdown("### 🔄 AI Improvement History")
+
+            for item in history:
+                if item["decision"] == "accepted":
+                    st.success(f"Accepted: {item['title']}")
+                else:
+                    st.info(f"Rejected: {item['title']}")
+
+            st.caption(
+                f"Iteration: {st.session_state['ai_recommendation_iteration']}"
+                f"/{st.session_state['ai_recommendation_limit']}"
+            )
+
+        if st.session_state.get("ai_recommendation_error"):
+            st.error(
+                "Could not get the next AI recommendation: "
+                    + st.session_state["ai_recommendation_error"]
+            )
+        if st.session_state.get("ai_recommendation_error"):
+            st.success(
+                "Meta AI has finshed the recommendation proccess!"
+            )
+
+        # Keep the AI plan valid only for the current dataset and settings.
+        copilot_config = json.dumps(
+            [
+                source_id,
+                int(num_rows),
+                excluded,
+                target_option,
+                task,
+                user_request,
+            ],
+            ensure_ascii=False,
+        )
+
+        if st.session_state.get("copilot_plan_config") != copilot_config:
+            st.session_state.pop("copilot_plan", None)
+            st.session_state.pop("copilot_plan_config", None)
+
+        if st.button("✨ Create AI Generation Plan"):
+            if not user_request.strip():
+                st.warning("Please describe what synthetic data you need.")
+            else:
+                try:
+                    with st.spinner("Meta AI is preparing your generation plan..."):
+                        plan = create_generation_plan(
+                            user_request=user_request,
+                            profile=profile_dataframe(generation_source),
+                            target_column=target_option,
+                            task=task,
+                        )
+
+                    st.session_state["copilot_plan"] = plan
+                    st.session_state["copilot_plan_config"] = copilot_config
+
+                    recommendations = plan.get("recommendations", [])
+                    if recommendations:
+                        st.session_state["current_ai_recommendation"] = recommendations[0]
+
+                    st.success("Meta AI generation plan is ready!")
+
+                except Exception as error:
+                    st.error(f"Could not create AI plan: {error}")
+
+        # Display the generated plan.
+        plan = st.session_state.get("copilot_plan")
+
+        if plan is not None and st.session_state.get("copilot_plan_config") == copilot_config:
+            st.markdown("### 📋 Meta AI Generation Plan")
+
+            st.markdown("**Goal**")
+            st.write(plan["goal"])
+
+            st.markdown("**Priorities**")
+            st.write(", ".join(plan["priorities"]))
+
+            st.markdown("**Checks**")
+            for check in plan["checks"]:
+                st.write(f"• {check}")
+
+            st.markdown("**Why this plan?**")
+            for reason in plan["rationale"]:
+                st.write(f"• {reason}")
+
+            if plan["warnings"]:
+                st.warning("Please review the following limitations:")
+                for warning in plan["warnings"]:
+                    st.write(f"• {warning}")
+
+            if plan.get("recommendations"):
+                st.json(plan["recommendations"])
+                st.markdown("### 💡 AI Recommendations")
+
+                for index, recommendation in enumerate(plan["recommendations"]):
+                    with st.container(border=True):
+                        st.markdown(f"{recommendation['title']}")
+                        st.write(recommendation["problem"])
+                        st.info(recommendation["action"])
+
+                        suggested_goal = recommendation.get("suggested_goal")
+
+                        if suggested_goal:
+                            if st.button(
+                                "✅ Apply Recommendation",
+                                key=f"applyrecommendation{index}",
+                                on_click=apply_ai_recommendation,
+                                args=(suggested_goal,),
+                            ):
+                                st.session_state["copilot_request_input"] = suggested_goal
+                                st.session_state.pop("copilot_plan", None)
+                                st.session_state.pop("copilot_plan_config", None)
+                                st.rerun()
+
+                        suggested_target = recommendation.get("suggested_target")
+                        if suggested_target:
+                            st.caption(
+                                f"Suggested target column: {suggested_target}. "
+                                "Select it manually above before creating a new plan."
+                            )
+
+            st.info("Review the plan before approving the first generation.")
+
+            current_recommendation = st.session_state.get(
+                    "current_ai_recommendation"
+                )
+
+            iteration = st.session_state["ai_recommendation_iteration"]
+            limit = st.session_state["ai_recommendation_limit"]
+
+            if current_recommendation and iteration < limit:
+
+                st.markdown("### 💡 Current AI Recommendation")
+
+                with st.container(border=True):
+
+                    st.markdown(
+                        f"#### {current_recommendation['title']}"
+                    )
+
+                    st.write("**Problem:**")
+                    st.write(current_recommendation["problem"])
+
+                    st.write("**AI recommendation:**")
+                    st.info(current_recommendation["action"])
+
+                    col_accept, col_reject = st.columns(2)
+
+                    with col_accept:
+                        st.button(
+                            "✅ Accept",
+                            key=f"accept_recommendation_{iteration}",
+                            on_click=save_ai_decision,
+                            args=(current_recommendation, "accepted"),
+                        )
+
+                    with col_reject:
+                        st.button(
+                            "❌ Reject",
+                            key=f"reject_recommendation_{iteration}",
+                            on_click=save_ai_decision,
+                            args=(current_recommendation, "rejected"),
+                        )
+
+            if st.button("✅ Approve Plan & Generate", type="primary"):
+                st.session_state.pop("generation_result", None)
+
+                try:
+                    with st.spinner("Generating synthetic data and evaluating trust..."):
+                        synthetic_df, reference, trust_report = run_generation(
+                            generation_source,
+                            int(num_rows),
+                            target_option,
+                            task,
+                        )
+
+                        trust_report["excluded_columns"] = excluded
+                        trust_report["ai_plan"] = plan
+
+                    st.session_state["generation_result"] = (
+                        synthetic_df,
+                        reference,
+                        trust_report,
+                    )
+                    st.success("AI-approved synthetic dataset generated!")
+
+                except Exception as error:
+                    st.error(f"AI generation failed: {error}")
+
+
         if st.session_state.get("run_config") != config:
             st.session_state.pop("generation_result", None)
             st.session_state.pop("comparison_column", None)
