@@ -138,13 +138,13 @@ if uploaded_file is not None or use_demo:
 
         # Data preview
         st.subheader("👀 Data Preview")
-        st.dataframe(df.head(20), use_container_width=True)
+        st.dataframe(df.head(20), width="stretch")
 
         # Column statistics
         st.subheader("📋 Column Statistics")
         st.dataframe(
             pd.DataFrame(report["columns"]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -485,7 +485,7 @@ if uploaded_file is not None or use_demo:
             synthetic_df, reference, trust_report = result
             st.subheader("🔬 Synthetic Data Preview")
             st.caption(f"All {len(synthetic_df):,} generated rows are available below. Scroll to view them.")
-            st.dataframe(synthetic_df, use_container_width=True, height=500)
+            st.dataframe(synthetic_df, width="stretch", height=500)
             st.download_button(
                 label="⬇️ Download Synthetic CSV",
                 data=synthetic_df.to_csv(index=False).encode("utf-8"),
