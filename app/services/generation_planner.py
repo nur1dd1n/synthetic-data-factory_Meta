@@ -5,6 +5,7 @@ import json
 import os
 
 from openai import OpenAI
+from sdv.single_table import GaussianCopulaSynthesizer
 
 
 ALLOWED_TASKS = {"auto", "classification", "regression"}
@@ -372,3 +373,101 @@ Rules:
         raise ValueError("Meta AI repeated a previous recommendation.")
 
     return result
+
+def create_generation_settings(
+    user_request: str,
+    profile: dict,
+    current_settings: dict | None = None,
+) -> dict:
+    """Ask Meta AI for validated SDV generation settings."""
+
+    allowed_distributions = sorted(
+        GaussianCopulaSynthesizer._DISTRIBUTIONS.keys()
+    )
+
+    if not allowed_distributions:
+        raise RuntimeError("SDV has no supported distributions.")
+
+    current_settings = current_settings or {
+        "default_distribution": "beta",
+        "enforce_min_max_values": True,
+        "enforce_rounding": True,
+    }
+
+    safe_profile = json.dumps(
+        profile,
+        ensure_ascii=False,
+        default=str,
+        allow_nan=False,
+    )
+
+    prompt = f"""
+You are configuring the SDV GaussianCopulaSynthesizer.
+
+USER GOAL:
+{user_request}
+
+DATASET PROFILE:
+{safe_profile}
+
+CURRENT SETTINGS:
+{json.dumps(current_settings, ensure_ascii=False)}
+
+ALLOWED DISTRIBUTIONS:
+{json.dumps(allowed_distributions)}
+
+Choose settings that may improve synthetic data quality.
+
+Return ONLY valid JSON with exactly these fields:
+
+{{
+  "default_distribution": "beta",
+  "enforce_min_max_values": true,
+  "enforce_rounding": true
+}}
+
+STRICT RULES:
+- default_distribution MUST be one of ALLOWED DISTRIBUTIONS.
+- enforce_min_max_values MUST be true or false.
+- enforce_rounding MUST be true or false.
+- Consider the dataset profile and user goal.
+- Prefer preserving realistic numeric ranges.
+- Do not invent parameters.
+- Do not return explanations or additional fields.
+"""
+
+    response = _get_client().responses.create(
+        model="muse-spark-1.3",
+        input=prompt,
+    )
+
+    raw = response.output_text.strip()
+
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1]
+        raw = raw.rsplit("```", 1)[0].strip()
+
+    try:
+        settings = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "Meta AI returned invalid generation settings."
+        ) from exc
+
+    required = {
+        "default_distribution",
+        "enforce_min_max_values",
+        "enforce_rounding",
+    }
+
+    if not isinstance(settings, dict) or set(settings) != required:
+        raise ValueError("Unexpected generation settings structure.")
+
+    if settings["default_distribution"] not in allowed_distributions:
+        raise ValueError("SDV distribution is not supported.")
+
+    for field in ("enforce_min_max_values", "enforce_rounding"):
+        if not isinstance(settings[field], bool):
+            raise ValueError(f"Invalid generation setting: {field}")
+
+    return settings

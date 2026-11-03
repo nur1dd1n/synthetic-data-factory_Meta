@@ -11,7 +11,7 @@ import streamlit as st
 from app.services.profiler import profile_dataframe
 from app.services.ai_assistant import explain_dataset
 from app.services.demo_data import make_demo_data
-from app.services.trust_report import run_generation
+from app.services.trust_report import run_generation, run_improvement_loop
 from frontend.trust_report_ui import render_trust_report
 from app.services.generation_planner import create_generation_plan
 from app.services.generation_planner import create_next_recommendation
@@ -363,12 +363,15 @@ if uploaded_file is not None or use_demo:
                 st.session_state.pop("generation_result", None)
 
                 try:
-                    with st.spinner("Generating synthetic data and evaluating trust..."):
-                        synthetic_df, reference, trust_report = run_generation(
-                            generation_source,
-                            int(num_rows),
-                            target_option,
-                            task,
+                    with st.spinner("Generating synthetic data and running AI improvements..."):
+                        synthetic_df, reference, trust_report = run_improvement_loop(
+                            source=generation_source,
+                            num_rows=int(num_rows),
+                            user_request=user_request,
+                            profile=st.session_state["current_generation_profile"],
+                            target=target_option,
+                            task=task,
+                            max_iterations=5,
                         )
 
                         trust_report["excluded_columns"] = excluded

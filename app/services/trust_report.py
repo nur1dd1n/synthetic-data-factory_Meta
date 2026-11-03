@@ -8,9 +8,10 @@ from app.services.ml_utility import evaluate_ml_utility, split_for_utility
 from app.services.privacy import evaluate_privacy_risk
 from app.services.quality import evaluate_statistical_quality
 from app.services.synthesizer import generate_synthetic_data
+from app.services.generation_planner import create_generation_settings
 
 
-def run_generation(source, num_rows, target=None, task="auto", generator=None):
+def run_generation(source, num_rows, target=None, task="auto", generator=None, generator_settings=None,):
     generator = generator or generate_synthetic_data
     requested_task = task
     train, test = source, None
@@ -20,7 +21,14 @@ def run_generation(source, num_rows, target=None, task="auto", generator=None):
             train, test, task = split_for_utility(source, target, task)
         except ValueError as exc:
             errors["ml_utility"] = str(exc)
-    synthetic = generator(train.copy(), num_rows)
+    if generator_settings:
+        synthetic = generator(
+            train.copy(),
+            num_rows,
+            **generator_settings,
+    )
+    else:
+        synthetic = generator(train.copy(), num_rows)
     report = {
         "version": "2.0", "created_at": datetime.now(timezone.utc).isoformat(),
         "source_rows": len(source), "training_rows": len(train),
@@ -52,6 +60,161 @@ def run_generation(source, num_rows, target=None, task="auto", generator=None):
     report["recommendations"] = recommendations(report)
     return synthetic, train, report
 
+def compare_generation_reports(current_report, candidate_report):
+    """Compare two generation reports without hiding metric trade-offs."""
+
+    metrics = (
+        ("quality", "overall_score", "higher"),
+        ("ml_utility", "utility_score", "higher"),
+        ("privacy", "risk_score", "lower"),
+    )
+
+    comparisons = {}
+    candidate_better = False
+    candidate_worse = False
+
+    for section, metric, direction in metrics:
+        current_data = current_report.get(section) or {}
+        candidate_data = candidate_report.get(section) or {}
+
+        current_value = current_data.get(metric)
+        candidate_value = candidate_data.get(metric)
+
+        if current_value is None or candidate_value is None:
+            comparisons[section] = {
+                "current": current_value,
+                "candidate": candidate_value,
+                "status": "not_comparable",
+            }
+            continue
+
+        if direction == "higher":
+            better = candidate_value > current_value
+            worse = candidate_value < current_value
+        else:
+            better = candidate_value < current_value
+            worse = candidate_value > current_value
+
+        if better:
+            candidate_better = True
+        elif worse:
+            candidate_worse = True
+
+        comparisons[section] = {
+            "current": current_value,
+            "candidate": candidate_value,
+            "status": (
+                "better" if better else
+                "worse" if worse else
+                "equal"
+            ),
+        }
+
+    # A candidate cannot win by trading away one metric
+    # for an improvement in another.
+    accepted = candidate_better and not candidate_worse
+
+    return {
+        "accepted": accepted,
+        "comparisons": comparisons,
+        "reason": (
+            "Candidate improves at least one metric without worsening another."
+            if accepted else
+            "Candidate does not dominate the current version."
+        ),
+    }
+
+def run_improvement_loop(
+    source,
+    num_rows,
+    user_request,
+    profile,
+    target=None,
+    task="auto",
+    max_iterations=5,
+):
+    """Generate, evaluate, and keep the best synthetic dataset."""
+
+    if not isinstance(max_iterations, int) or not 1 <= max_iterations <= 5:
+        raise ValueError("max_iterations must be between 1 and 5.")
+
+    # First generation: keep the existing default SDV behavior.
+    best_synthetic, best_reference, best_report = run_generation(
+        source, num_rows, target, task
+    )
+
+    best_settings = {
+        "default_distribution": "beta",
+        "enforce_min_max_values": True,
+        "enforce_rounding": True,
+    }
+
+    history = []
+
+    for iteration in range(1, max_iterations + 1):
+        try:
+            settings = create_generation_settings(
+                user_request=user_request,
+                profile=profile,
+                current_settings=best_settings,
+            )
+
+            if settings == best_settings:
+                history.append({
+                    "iteration": iteration,
+                    "status": "stopped",
+                    "reason": "AI suggested the current settings again.",
+                })
+                break
+
+            candidate_synthetic, candidate_reference, candidate_report = (
+                run_generation(
+                    source,
+                    num_rows,
+                    target,
+                    task,
+                    generator_settings=settings,
+                )
+            )
+
+            comparison = compare_generation_reports(
+                best_report,
+                candidate_report,
+            )
+
+            history.append({
+                "iteration": iteration,
+                "status": (
+                    "accepted" if comparison["accepted"] else "rejected"
+                ),
+                "settings": settings,
+                "comparison": comparison,
+            })
+
+            if not comparison["accepted"]:
+                break
+
+            best_synthetic = candidate_synthetic
+            best_reference = candidate_reference
+            best_report = candidate_report
+            best_settings = settings
+
+        except Exception as error:
+            history.append({
+                "iteration": iteration,
+                "status": "error",
+                "reason": f"{type(error).__name__}: {error}",
+            })
+            break
+
+    best_report["improvement_loop"] = {
+        "max_iterations": max_iterations,
+        "completed_iterations": len(history),
+        "selected_settings": best_settings,
+        "history": history,
+    }
+
+    return best_synthetic, best_reference, best_report
 
 def recommendations(report):
     result = []

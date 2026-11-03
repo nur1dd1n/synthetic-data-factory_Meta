@@ -84,6 +84,39 @@ def render_trust_report(report, original, synthetic):
                 st.warning("Possible identifiers: " + ", ".join(privacy["potential_identifier_columns"]))
                 st.write("Non-null identifier value overlap (%)", privacy["identifier_value_overlap_percent"])
             st.caption(privacy["warning"])
+
+    # AI improvement loop results
+    improvement = report.get("improvement_loop")
+
+    if improvement:
+        st.divider()
+        st.subheader("🤖 AI Improvement Loop")
+
+        st.metric(
+            "Completed iterations",
+            f"{improvement['completed_iterations']} / {improvement['max_iterations']}",
+        )
+
+        st.markdown("**Selected generation settings**")
+        st.json(improvement["selected_settings"])
+
+        st.markdown("**Iteration history**")
+
+        for item in improvement["history"]:
+            with st.expander(
+                f"Iteration {item['iteration']}: {item['status'].upper()}"
+            ):
+                if "settings" in item:
+                    st.write("Generation settings:")
+                    st.json(item["settings"])
+
+                if "comparison" in item:
+                    st.write("Metric comparison:")
+                    st.json(item["comparison"])
+
+                if "reason" in item:
+                    st.info(item["reason"])
+                    
     st.markdown("**Recommended next steps**")
     for recommendation in report["recommendations"]:
         st.write("• " + recommendation)
