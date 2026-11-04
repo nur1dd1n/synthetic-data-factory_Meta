@@ -51,6 +51,11 @@
 [data-testid="stCaptionContainer"] { color: #bfb0d0; }
 [data-testid="stFileUploaderDropzone"] { background: #150f20; border: 1px dashed #b395d35c; border-radius: 14px; padding: 24px; }
 [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] { background: #15101f; border-color: #b395d345; border-radius: 10px; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"] { background: #abdf6e; color: #111611; border-color: #abdf6e; border-radius: 8px; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"]:hover { background: #b5eb74; border-color: #b5eb74; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"] span { color: #111611; font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 600; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"] svg { color: #111611; fill: currentColor; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"]:focus-visible { outline: 2px solid #d0eead; outline-offset: 3px; }
 [data-testid="stButton"] button, [data-testid="stDownloadButton"] button, [data-testid="stFileUploaderDropzone"] button { border-radius: 10px; border-color: #ac8acf60; background: #2b1e3c; color: #f0e8fa; transition: border-color .2s ease, background .2s ease; }
 [data-testid="stButton"] button:hover, [data-testid="stDownloadButton"] button:hover { border-color: #bef87a; color: #d1f9a9; background: #342642; }
 [data-testid="stButton"] button[kind="primary"] { background: #bef87a; color: #18230e; border-color: #bef87a; font-weight: 650; }
