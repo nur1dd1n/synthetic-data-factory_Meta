@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+  * { box-sizing: border-box; } body { margin: 0; color: #c6b7d8; font: 11px "Avenir Next", "Segoe UI", sans-serif; }
+  .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; }
+  button { border: 1px solid #b494df4d; border-radius: 20px; padding: 7px 13px; background: #21172f; color: #d8c6ed; cursor: pointer; font: inherit; }
+  button:hover { border-color: #bef87a; } button:focus-visible, input:focus-visible { outline: 2px solid #bef87a; outline-offset: 3px; }
+  label { display: flex; align-items: center; gap: 8px; } input { width: 75px; accent-color: #bef87a; }
+  .hint { color: #a99bb9; } @media(max-width:560px) { .hint { display: none; } }
+</style></head><body>
+<div class="controls">
+  <button id="motion" type="button" aria-pressed="false">Pause liquid</button>
+  <label for="energy">Intensity <input id="energy" type="range" min="0" max="100" value="40" aria-label="Liquid intensity"></label>
+  <span class="hint">Move your cursor to stir the liquid</span>
+</div>
+<script>
+(() => {
+  // Recreated by Streamlit on reruns; remove old listeners before attaching.
+  let host;
+  try { host = window.parent.document; void host.documentElement; } catch (_) {
+    document.querySelector('.controls').hidden = true; return;
+  }
+  const root = host.documentElement;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const button = document.getElementById('motion');
+  const energy = document.getElementById('energy');
+  let paused = root.dataset.sdfPaused === 'true' || reduced.matches;
+  energy.value = root.dataset.sdfIntensity || '40';
+  let frame = 0, x = 0, y = 0;
+  function paintState() {
+    root.dataset.sdfPaused = String(paused);
+    root.style.setProperty('--sdf-motion', paused ? 'paused' : 'running');
+    button.textContent = paused ? 'Resume liquid' : 'Pause liquid';
+    button.setAttribute('aria-pressed', String(paused));
+    button.disabled = reduced.matches;
+    if (reduced.matches) button.textContent = 'Reduced motion';
+  }
+  function paintPointer() {
+    frame = 0;
+    if (paused || host.hidden) return;
+    const scale = Number(energy.value) / 100;
+    root.style.setProperty('--sdf-x', (x * scale * 75).toFixed(1) + 'px');
+    root.style.setProperty('--sdf-y', (y * scale * 55).toFixed(1) + 'px');
+  }
+  function pointer(event) {
+    x = event.clientX / Math.max(host.documentElement.clientWidth, 1) * 2 - 1;
+    y = event.clientY / Math.max(host.documentElement.clientHeight, 1) * 2 - 1;
+    if (!frame && !paused) frame = requestAnimationFrame(paintPointer);
+  }
+  function intensity() {
+    root.dataset.sdfIntensity = energy.value;
+    const scale = Number(energy.value) / 100;
+    host.querySelectorAll('.sdf-fluid').forEach(el => { el.style.opacity = String(.14 + scale * .5); });
+    paintPointer();
+  }
+  function visibility() { root.style.setProperty('--sdf-motion', paused || host.hidden ? 'paused' : 'running'); }
+  function preference() { paused = reduced.matches; paintState(); }
+  button.addEventListener('click', () => { paused = !paused; paintState(); });
+  energy.addEventListener('input', intensity);
+  if (window.parent.__sdfLiquidCleanup) window.parent.__sdfLiquidCleanup();
+  host.addEventListener('pointermove', pointer, {passive:true});
+  host.addEventListener('visibilitychange', visibility);
+  reduced.addEventListener('change', preference);
+  const cleanup = () => {
+    host.removeEventListener('pointermove', pointer);
+    host.removeEventListener('visibilitychange', visibility);
+    reduced.removeEventListener('change', preference);
+    if (frame) cancelAnimationFrame(frame);
+  };
+  window.parent.__sdfLiquidCleanup = cleanup;
+  window.addEventListener('pagehide', cleanup, {once:true});
+  paintState(); intensity();
+})();
+</script></body></html>

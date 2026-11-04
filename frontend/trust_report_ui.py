@@ -28,7 +28,6 @@ def distribution_table(original, synthetic):
 
 
 def render_trust_report(report, original, synthetic):
-    st.divider()
     st.subheader("Automated Trust Report")
     st.caption(f"This run: {report['training_rows']} training rows, {report['test_rows']} reserved test rows, "
                f"{report['generated_rows']} synthetic rows. Target: {report['target'] or 'none'}.")
@@ -56,7 +55,7 @@ def render_trust_report(report, original, synthetic):
         column = st.selectbox("Compare column", list(original.columns), key="comparison_column")
         table = distribution_table(original[column], synthetic[column])
         if not table.empty:
-            st.bar_chart(table)
+            st.bar_chart(table, color=["#bef87a", "#ae83ff"])
         st.caption("Shares use common bins for numbers, or top 15 categories plus the remainder. "
                    "Numeric missing values are excluded from the histogram.")
         st.write({"Original missing (%)": round(original[column].isna().mean() * 100, 2),
@@ -94,7 +93,7 @@ def render_trust_report(report, original, synthetic):
 
     if improvement:
         st.divider()
-        st.subheader("🤖 AI Improvement Loop")
+        st.subheader("AI Improvement Loop")
 
         st.metric(
             "Attempted tuning iterations",
